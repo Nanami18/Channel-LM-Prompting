@@ -150,7 +150,8 @@ def get_paths(out_dir, gpt2, method, task, do_zeroshot,
               prompt_tune=False,
               head_tune=False,
               transform_tune=False,
-              n_prefix=20):
+              n_prefix=20,
+              use_ckpt=False):
 
     model_name = gpt2
 
@@ -185,8 +186,12 @@ def get_paths(out_dir, gpt2, method, task, do_zeroshot,
 
         if use_demonstrations:
             cache_path += "-tseed={}".format(train_seed)
-
-        cache_path += "-t={}".format(template_idx)
+            
+        if use_ckpt:
+            cache_path += "-t={}".format(template_idx)
+            cache_path += "_ckpt"
+        else:
+            cache_path += "-t={}".format(template_idx)
 
         return os.path.join(base_dir, cache_path+".pkl")
 

@@ -153,7 +153,7 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
         cache_paths = [get_paths(out_dir, gpt2, method_type, task, do_zeroshot,
                                  k, seed, train_seed, split, template_idx,
                                  use_demonstrations=use_demonstrations,
-                                 ensemble=ensemble)]
+                                 ensemble=ensemble, use_ckpt = args.use_ckpt)]
         checkpoints = [None]
 
     else:
@@ -169,7 +169,7 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
 
         k = int(k)
         eval_period = 100
-        num_training_steps = 400
+        num_training_steps = 100
 
         cache_paths = [os.path.join(out_dir, "{}cache-{}-{}.pkl".format(
             task + "-" if train_task != task else "",
@@ -200,13 +200,18 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
         if not do_check:
             config = AutoConfig.from_pretrained(gpt2)
             config.gradient_checkpointing = True
+            config.use_cache = False
             model = AutoModelForCausalLM.from_pretrained(gpt2, config=config)
-            print(model.config)
-            
-            if getattr(model.config, "gradient_checkpointing", False):
-                print("checking")
-            else:
-                print("not checking")
+            # Load checkpoint for fine-tuning
+            if args.tune_ckpt:
+                ckpt = torch.load("../fft/runs_gpt2/last.ckpt")
+                ckpt_state_dict = ckpt['state_dict']
+                ckpt_match = {k[6:]:v for k,v in ckpt_state_dict.items() if k[6:] in model.state_dict()}
+                model.load_state_dict(ckpt_match)
+                del ckpt
+                del ckpt_match
+                torch.cuda.empty_cache()
+
             if prompt_tune:
                 for param in model.parameters():
                     param.requires_grad = False
@@ -301,12 +306,16 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
     logger.info(tokenizer.decode([_id for _id, _type_id in zip(input_ids, token_type_ids) if _type_id == 1]))
 
     results = []
+    
+    # Make sure the most recent checkpoints is loaded
+    checkpoints.reverse()
+    cache_paths.reverse()
     for cache_path, checkpoint in zip(cache_paths, checkpoints):
 
         logger.info(cache_path)
-
+        logger.info(checkpoint)
         # if there is a cache, load it
-        if os.path.exists(cache_path):
+        if os.path.exists(cache_path) and False:
             with open(cache_path, "rb") as f:
                 losses = pkl.load(f)
         else:
@@ -321,12 +330,21 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
                 logger.info("Loading the model")
                 torch.cuda.empty_cache()
                 del model
-                model = load_checkpoint(gpt2, checkpoint,
-                                        prompt_tune=prompt_tune,
-                                        head_tune=head_tune,
-                                        transform_tune=transform_tune,
-                                        n_prefix=n_prefix,
-                                        mapping=mapping)
+
+                if not args.use_ckpt:
+                    model = load_checkpoint(gpt2, checkpoint,
+                                            prompt_tune=prompt_tune,
+                                            head_tune=head_tune,
+                                            transform_tune=transform_tune,
+                                            n_prefix=n_prefix,
+                                            mapping=mapping)
+                else:
+                    ckpt = torch.load("../fft/runs_gpt2/last.ckpt")
+                    ckpt_match = {k[6:]:v for k,v in ckpt['state_dict'].items()}
+                    model = GPT2LMHeadModel.from_pretrained(gpt2, state_dict=ckpt_match)
+                    del ckpt_match
+                    del ckpt
+                    torch.cuda.empty_cache()
                 model = model.cuda()
                 model.eval()
                 logger.info("Finished loading the model")
@@ -407,6 +425,8 @@ if __name__ == '__main__':
     parser.add_argument("--method", type=str, default="direct")
     parser.add_argument("--n_prefix", type=int, default=20)
     parser.add_argument("--gpt2", type=str, default="gpt2-large")
+    parser.add_argument("--use_ckpt", default=False, action="store_true")
+    parser.add_argument("--tune_ckpt", default=False, action="store_true")
 
     args = parser.parse_args()
 

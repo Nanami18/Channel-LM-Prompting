@@ -15,6 +15,7 @@ import os
 import csv
 import numpy as np
 import pandas as pd
+import random
 
 from collections import defaultdict
 from pandas import DataFrame
@@ -102,6 +103,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="data", help="Output path")
     parser.add_argument("--mode", type=str, default='k-shot', choices=['k-shot', 'k-shot-10x'], help="k-shot or k-shot-10x (10x dev set)")
     parser.add_argument("--balance", action="store_true")
+    parser.add_argument("--test_limit", type=int, default=None)
 
     args = parser.parse_args()
     args.output_dir = os.path.join(args.output_dir, args.mode)
@@ -121,6 +123,7 @@ def main_for_gao(args, tasks):
         for task, dataset in datasets.items():
             # Set random seed
             np.random.seed(seed)
+            random.seed(seed)
 
             # Shuffle the training set
             #print("| Task = %s" % (task))
@@ -161,28 +164,56 @@ def main_for_gao(args, tasks):
             if task in ["MNLI", "MRPC", "QNLI", "QQP", "RTE", "SNLI", "SST-2", "STS-B", "WNLI", "CoLA"]:
                 # GLUE style
                 # Use the original development set as the test set (the original test sets are not publicly available)
-                for split, lines in dataset.items():
-                    if split.startswith("train"):
-                        continue
-                    lines = dataset[split]
-                    split = split.replace('dev', 'test')
-                    with open(os.path.join(setting_dir, f"{split}.tsv"), "w") as f:
-                        for line in lines:
-                            f.write(line)
+                if not args.test_limit:
+                    for split, lines in dataset.items():
+                        if split.startswith("train"):
+                            continue
+                        lines = dataset[split]
+                        split = split.replace('dev', 'test')
+                        with open(os.path.join(setting_dir, f"{split}.tsv"), "w") as f:
+                            for line in lines:
+                                f.write(line)
+                else:
+                    for split, lines in dataset.items():
+                        if split.startswith("train"):
+                            continue
+                        if args.test_limit < len(lines):
+                            lines = random.sample(dataset[split], args.test_limit)
+                            lines = dataset[split][:args.test_limit]
+                        else:
+                            lines = dataset[split]
+                        split = split.replace('dev', 'test')
+                        with open(os.path.join(setting_dir, f"{split}.tsv"), "w") as f:
+                            for line in lines:
+                                f.write(line)
 
 
             else:
                 # Other datasets
                 # Use the original test sets
-                dataset['test'].to_csv(os.path.join(setting_dir, 'test.csv'), header=False, index=False)
+                if not args.test_limit or args.test_limit >= len(dataset['test']):
+                    dataset['test'].to_csv(os.path.join(setting_dir, 'test.csv'), header=False, index=False)
+                else:
+                    dataset['test'].sample(args.test_limit).to_csv(os.path.join(setting_dir, 'test.csv'), header=False, index=False)
 
             if task in ["MNLI", "MRPC", "QNLI", "QQP", "RTE", "SNLI", "SST-2", "STS-B", "WNLI", "CoLA"]:
                 with open(os.path.join(setting_dir, "train.tsv"), "w") as f:
                     for line in train_header:
                         f.write(line)
-                    for label in label_list:
-                        for line in label_list[label][:k*n_classes]:
-                            f.write(line)
+                    if args.balance:
+                        base = k//len(label_list)
+                        extra = k-base*len(label_list)
+                        for label in label_list:
+                            for line in label_list[label][:base]:
+                                f.write(line)
+                        class_num = -1
+                        for i in range(extra):
+                            class_num += 1
+                            f.write(label_list[list(label_list.keys())[class_num]][base])
+                    else:
+                        for label in label_list:
+                            for line in label_list[label][:k*n_classes]:
+                                f.write(line)
                 name = "dev.tsv"
                 if task == 'MNLI':
                     name = "dev_matched.tsv"
@@ -195,9 +226,21 @@ def main_for_gao(args, tasks):
                             f.write(line)
             else:
                 new_train = []
-                for label in label_list:
-                    for line in label_list[label][:k*n_classes]:
+                if args.balance:
+                    base = k//len(label_list)
+                    extra = k - base*len(label_list)
+                    for label in label_list:
+                        for line in label_list[label][:base]:
+                            new_train.append(line)
+                    class_num = -1
+                    for i in range(extra):
+                        class_num += 1
+                        line = label_list[list(label_list.keys())[class_num]][class_num+base]
                         new_train.append(line)
+                else:
+                    for label in label_list:
+                        for line in label_list[label][:k*n_classes]: # I don't think this # n_classes is doing anything useful
+                            new_train.append(line)
                 new_train = DataFrame(new_train)
                 new_train.to_csv(os.path.join(setting_dir, 'train.csv'), header=False, index=False)
 
@@ -274,16 +317,33 @@ def prepro_for_zhang(dataname, split, seed, args):
     save_path = os.path.join(save_dir, "{}.tsv".format(split))
     with open(save_path, "w") as f:
         f.write("sentence\tlabel\n")
-        for sents in data.values():
-            if split=="test":
-                pass
-            elif balance:
-                sents = sents[:k]
-            else:
-                sents = sents[:k]
-            for sent, label in sents:
+        if args.balance and split != "test":
+            base = k//len(data)
+            extra = k - base*len(data)
+            for sents in data.values():
+                sents = sents[:base]
+                for sent, label in sents:
+                    assert "\t" not in sent, sent
+                    f.write("%s\t%s\n" % (sent, label))
+
+            class_num = -1
+            for i in range(extra):
+                class_num += 1
+                sent, label = data[list(data.keys())[class_num]][base]
                 assert "\t" not in sent, sent
                 f.write("%s\t%s\n" % (sent, label))
+
+        else:
+            for sents in data.values():
+                if split=="test":
+                    pass
+                elif balance:
+                    sents = sents[:k]
+                else:
+                    sents = sents[:k]
+                for sent, label in sents:
+                    assert "\t" not in sent, sent
+                    f.write("%s\t%s\n" % (sent, label))
 
 if __name__ == "__main__":
     main()
