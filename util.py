@@ -186,7 +186,7 @@ def get_paths(out_dir, gpt2, method, task, do_zeroshot,
 
         if use_demonstrations:
             cache_path += "-tseed={}".format(train_seed)
-            
+
         if use_ckpt:
             cache_path += "-t={}".format(template_idx)
             cache_path += "_ckpt"
@@ -199,7 +199,7 @@ def get_paths(out_dir, gpt2, method, task, do_zeroshot,
 
     out_dir = "BS={}-k={}-t={}-seed={}-tseed={}-lr={}{}".format(
             batch_size, k, template_idx, seed, train_seed, lr,
-            "-wamrup={}".format(warmup_steps) if warmup_steps>0 else "",
+            "-warmup={}".format(warmup_steps) if warmup_steps>0 else "",
     )
 
 
