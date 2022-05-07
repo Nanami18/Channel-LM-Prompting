@@ -169,7 +169,7 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
 
         k = int(k)
         eval_period = 100
-        num_training_steps = 100
+        num_training_steps = 400
 
         cache_paths = [os.path.join(out_dir, "{}cache-{}-{}.pkl".format(
             task + "-" if train_task != task else "",
@@ -202,7 +202,6 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
             config.gradient_checkpointing = True
             config.use_cache = False
             model = AutoModelForCausalLM.from_pretrained(gpt2, config=config)
-            # Load checkpoint for fine-tuning
             if args.tune_ckpt:
                 ckpt = torch.load("../fft/runs_gpt2/last.ckpt")
                 ckpt_state_dict = ckpt['state_dict']
@@ -251,7 +250,8 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
                   num_training_steps=num_training_steps,
                   prompt_tune=prompt_tune,
                   head_tune=head_tune,
-                  transform_tune=transform_tune)
+                  transform_tune=transform_tune,
+                  optim_path=args.optim_path)
 
     input_tensors = prepare_data(
         tokenizer, train_data, dev_data,
@@ -306,8 +306,6 @@ def run(logger, do_train, do_zeroshot, task, train_task, k, seed,
     logger.info(tokenizer.decode([_id for _id, _type_id in zip(input_ids, token_type_ids) if _type_id == 1]))
 
     results = []
-    
-    # Make sure the most recent checkpoints is loaded
     checkpoints.reverse()
     cache_paths.reverse()
     for cache_path, checkpoint in zip(cache_paths, checkpoints):
@@ -427,6 +425,7 @@ if __name__ == '__main__':
     parser.add_argument("--gpt2", type=str, default="gpt2-large")
     parser.add_argument("--use_ckpt", default=False, action="store_true")
     parser.add_argument("--tune_ckpt", default=False, action="store_true")
+    parser.add_argument("--optim_path", type=str, default="../fft/runs_gpt2/last.ckpt")
 
     args = parser.parse_args()
 

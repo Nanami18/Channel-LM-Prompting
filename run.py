@@ -4,7 +4,7 @@ import numpy as np
 
 from tqdm import tqdm
 
-from model_util import get_optimizer_and_scheduler, get_dataloader
+from model_util import get_optimizer_and_scheduler, get_dataloader, load_optimizer_and_scheduler
 
 def train(logger, model, inputs, batch_size, output_dir,
           learning_rate=1e-5,
@@ -15,13 +15,17 @@ def train(logger, model, inputs, batch_size, output_dir,
           eval_period=20,
           prompt_tune=False,
           head_tune=False,
-          transform_tune=False):
-    optimizer, scheduler = get_optimizer_and_scheduler(
-        "adamw",
-        model,
-        learning_rate=learning_rate,
-        warmup_steps=warmup_steps,
-        num_training_steps=num_training_steps)
+          transform_tune=False,
+          optim_path=None):
+    if optim_path != "NA":
+        optimizer, scheduler = load_optimizer_and_scheduler('adamw', model, optim_path)
+    else:
+        optimizer, scheduler = get_optimizer_and_scheduler(
+            "adamw",
+            model,
+            learning_rate=learning_rate,
+            warmup_steps=warmup_steps,
+            num_training_steps=num_training_steps)
     dataloader = get_dataloader(inputs, batch_size, is_training=True)
 
     n_trainable_params = len([param for param in model.parameters() if param.requires_grad])
@@ -34,7 +38,6 @@ def train(logger, model, inputs, batch_size, output_dir,
     train_losses = []
     best_accuracy = -1
     stop_training=False
-
     logger.info("Start training")
     for epoch in range(num_training_steps):
         for batch in dataloader:
